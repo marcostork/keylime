@@ -30,7 +30,7 @@ VALID_BACKENDS = ["ecdsa", "x509"]
 
 def get_arg_parser(create_parser: _SubparserType, parent_parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """Perform the setup of the command-line arguments for this module."""
-    sign_p = create_parser.add_parser("runtime", help="create runtime policies", parents=[parent_parser])
+    sign_p = create_parser.add_parser("runtime", help="sign runtime policies", parents=[parent_parser])
 
     sign_p.add_argument(
         "-o",
@@ -107,8 +107,12 @@ def _get_signer(
 
     ec_privkey: Optional[ec.EllipticCurvePrivateKey] = None
     if in_ec_keyfile_path:
-        with open(in_ec_keyfile_path, "rb") as pem_in:
-            pemlines = pem_in.read()
+        try:
+            with open(in_ec_keyfile_path, "rb") as pem_in:
+                pemlines = pem_in.read()
+        except FileNotFoundError:
+            logger.error("The specified key '%s' does not exist", in_ec_keyfile_path)
+            return None
         privkey = load_pem_private_key(pemlines, None, default_backend())
 
         if not isinstance(privkey, ec.EllipticCurvePrivateKey):
@@ -124,8 +128,8 @@ def _get_signer(
         else:
             signer = ecdsa.Signer.create(out_keyfile_path)
     elif backend == "x509":
-        if out_certfile is None:
-            logger.debug("x509 backend and no cerficate output file specified")
+        if out_certfile is None or out_certfile == "":
+            logger.error("x509 backend and no cerficate output file specified")
             return None
 
         if ec_privkey:
