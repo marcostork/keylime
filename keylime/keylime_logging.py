@@ -1,6 +1,8 @@
 import contextvars
-import logging, ast, io
+import logging
+import sys
 from configparser import RawConfigParser
+from contextlib import contextmanager
 from logging import Logger
 from logging import config as logging_config
 from typing import TYPE_CHECKING, Any, Callable, Dict
@@ -10,8 +12,32 @@ from keylime import config
 if TYPE_CHECKING:
     from logging import LogRecord
 
+DEFAULT_LOGGING_CONFIG = {
+    "version": 1,
+    "root": {"level": "NOTSET", "handlers": ["console"]},
+    "loggers": {
+        "keylime": {  # Keylime logger
+            "level": "INFO",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "NOTSET",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout",  # Outputs to console
+        }
+    },
+    "formatters": {
+        "simple": {
+            "format": "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+}
+
 try:
-    logging_config.fileConfig(config.get_config("logging"))
+    logging_config.dictConfig(DEFAULT_LOGGING_CONFIG)
 except KeyError:
     logging.basicConfig(format="%(asctime)s %(name)-12s %(levelname)-8s %(message)s", level=logging.DEBUG)
 
@@ -59,65 +85,111 @@ def annotate_logger(logger: Logger) -> None:
     for handler in logger.handlers:
         handler.addFilter(request_id_filter)
 
-def apply_child_logger(raw_config: RawConfigParser, child_logger_name: str) -> RawConfigParser:
+
+def _configure_logging_from_raw(raw_config: RawConfigParser) -> None:
     """
-    Applies logging configuration to add or modify a component logger using fileConfig.
-    Ensures that all required sections ([loggers], [handlers], and [formatters]) are properly merged
-    with the existing configuration to prevent disruption of other components' logging.
+    Configures logging programmatically based on the provided RawConfigParser object.
 
     Args:
-        raw_config (RawConfigParser): The source configuration containing the new logger settings.
-        child_logger_name (str): The name of the child logger to configure.
+        raw_config (RawConfigParser): The source configuration containing logging sections.
     """
-    # Retrieve the current project-wide logging configuration as the base.
-    logging_config = config.get_config("logging")
+    # Dictionaries to store formatters and handlers
+    formatters = {}
+    handlers = {}
 
-    # Merge the 'loggers' section, ensuring 'root' and 'keylime' are not altered.
-    if 'loggers' in raw_config:
-        existing_loggers = logging_config['loggers']['keys'].split(',')
-        new_loggers = raw_config['loggers']['keys'].split(',')
-        for new_logger in new_loggers:
-            if new_logger not in existing_loggers:
-                existing_loggers.append(new_logger)
-        logging_config.set('loggers', 'keys', ','.join(existing_loggers))
-
-    # Collect new handlers and formatters from the raw configuration.
-    new_handler_keys = []
-    new_formatter_keys = []
+    # Step 1: Process formatters first
     for section in raw_config.sections():
-        if section.startswith('handler_'):
-            handler_name = section.split('_', 1)[1]
-            new_handler_keys.append(handler_name)
-            logging_config[section] = raw_config[section]
-        elif section.startswith('formatter_'):
-            formatter_name = section.split('_', 1)[1]
-            new_formatter_keys.append(formatter_name)
-            logging_config[section] = raw_config[section]
+        if section.startswith("formatter_"):
+            formatter_name = section.split("_", 1)[1]
+            formatter_options = dict(raw_config.items(section))
+            format_str = formatter_options.get("format", "%(message)s")
+            datefmt = formatter_options.get("datefmt", None)
+            formatters[formatter_name] = logging.Formatter(format_str, datefmt)
 
-    # Add or update the child logger's configuration.
-    child_logger_section = f'logger_{child_logger_name}'
-    if raw_config.has_section(child_logger_section):
-        logging_config[child_logger_section] = raw_config[child_logger_section]
+    # Step 2: Process handlers after formatters
+    for section in raw_config.sections():
+        if section.startswith("handler_"):
+            handler_name = section.split("_", 1)[1]
+            handler_options = dict(raw_config.items(section))
+            handler_class = handler_options.get("class", "logging.StreamHandler")
+            level = handler_options.get("level", "NOTSET").upper()
+            formatter_name = handler_options.get("formatter", None)
+            args = eval(handler_options.get("args", "()"))  # Handle args safely
 
-    # Merge the 'handlers' section.
-    if new_handler_keys:
-        existing_handlers = logging_config['handlers']['keys'].split(',')
-        for new_handler in new_handler_keys:
-            if new_handler not in existing_handlers:
-                existing_handlers.append(new_handler)
-        logging_config.set('handlers', 'keys', ','.join(existing_handlers))
+            try:
+                if "StreamHandler" in handler_class:
+                    handler = logging.StreamHandler(stream=sys.stdout if not args else args[0])
+                elif "FileHandler" in handler_class:
+                    handler = logging.FileHandler(filename=args[0])
+                else:
+                    raise ValueError(f"Unsupported handler class: {handler_class}")
 
-    # Merge the 'formatters' section.
-    if new_formatter_keys:
-        existing_formatters = logging_config['formatters']['keys'].split(',')
-        for new_formatter in new_formatter_keys:
-            if new_formatter not in existing_formatters:
-                existing_formatters.append(new_formatter)
-        logging_config.set('formatters', 'keys', ','.join(existing_formatters))
+                handler.setLevel(getattr(logging, level, logging.NOTSET))
+                if formatter_name in formatters:
+                    handler.setFormatter(formatters[formatter_name])
 
-    return logging_config
+                handlers[handler_name] = handler
+            except Exception as e:
+                print(f"Error configuring handler {handler_name}: {e}", file=sys.stderr)
 
-def safe_get_config(loggername: str) -> RawConfigParser:
+    # Step 3: Process loggers after handlers
+    for section in raw_config.sections():
+        if section.startswith("logger_"):
+            logger_name = section.split("_", 1)[1]
+            logger_options = dict(raw_config.items(section))
+            level = logger_options.get("level", "NOTSET").upper()
+            propagate = logger_options.get("propagate", "1") == "1"
+            handler_names = logger_options.get("handlers", "").split(",")
+
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(getattr(logging, level, logging.NOTSET))
+            logger.propagate = propagate
+
+            for handler_name in handler_names:
+                handler_name = handler_name.strip()
+                if handler_name in handlers:
+                    logger.addHandler(handlers[handler_name])
+
+
+@contextmanager
+def safe_logging_configuration():
+    """
+    Context manager to safely apply logging configuration. If an error occurs,
+    all loggers (root and named) are restored to their original state, including handlers and formatters.
+    """
+    # Backup all existing loggers and their handlers
+    existing_loggers = {
+        name: {
+            "handlers": list(logger.handlers),
+            "level": logger.level,
+            "propagate": logger.propagate,
+        }
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)  # Ensure it's a valid logger
+    }
+    # Backup root logger
+    root_logger = logging.getLogger()
+    root_backup = {
+        "handlers": list(root_logger.handlers),
+        "level": root_logger.level,
+    }
+
+    try:
+        yield  # Run the logging configuration
+    except Exception as e:
+        # Restore potentially affected loggers
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if name in existing_loggers and isinstance(logger, logging.Logger):
+                logger.handlers = existing_loggers[name]["handlers"]
+                logger.level = existing_loggers[name]["level"]
+                logger.propagate = existing_loggers[name]["propagate"]
+        # Restore root logger
+        root_logger.handlers = root_backup["handlers"]
+        root_logger.setLevel(root_backup["level"])
+        raise
+
+
+def _safe_get_config(loggername: str) -> RawConfigParser:
     try:
         return config.get_config(loggername)
     except Exception:  # Replace with the actual exception
@@ -125,30 +197,19 @@ def safe_get_config(loggername: str) -> RawConfigParser:
 
 
 def init_logging(loggername: str) -> Logger:
-
     logger = logging.getLogger(f"keylime.{loggername}")
 
-    component_config = safe_get_config(loggername)
-    
+    component_config = _safe_get_config(loggername)
+
     # Apply logger component configuration
     if component_config:
-        logging_config = apply_child_logger(component_config, f"keylime.{loggername}")
-        # Apply the updated logging configuration using fileConfig.
+        # Update the logging configuration with the component logging configuration (if any)
         try:
-            # Convert the updated configuration to a string for fileConfig compatibility.
-            temp_config_string = io.StringIO()
-            logging_config.write(temp_config_string)
-            temp_config_string.seek(0)
-
-            # Apply the configuration
-            logging.config.fileConfig(logging_config, disable_existing_loggers=False)
-        except KeyError as e:
-            logger.error(f"Configuration Error: Missing key {e} in the configuration file.")
-        except ValueError as e:
-            logger.error(f"Configuration Error: Invalid value encountered - {e}.")
+            with safe_logging_configuration():
+                _configure_logging_from_raw(component_config)
         except Exception as e:
-            logger.error(f"Unexpected Error: {e}.")
-    
+            logger.error("Logging configuration error:", e)
+
     logging.getLogger("requests").setLevel(logging.WARNING)
 
     # Disable default Tornado logs, as we are outputting more detail to the 'keylime.web' logger
