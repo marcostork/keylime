@@ -64,20 +64,20 @@ def load_cert_by_path(cert_path: str) -> Certificate:
     return cert
 
 
-def read_password(key_store_pw: Optional[str] = None) -> None:
+def read_password(component: str, key_store_pw: Optional[str] = None) -> None:
     global global_password
     if not key_store_pw:
-        key_store_pw = config.get("ca", "password", fallback="default")
+        key_store_pw = config.get(component, "password", fallback="default")
 
     if key_store_pw == "default":
-        logger.warning("Using 'default' password option from CA configuration file")
+        logger.warning(f"Using 'default' password option from {component} configuration file")
     global_password = key_store_pw
 
 
-def ask_password(key_store_pw: Optional[str] = None) -> None:
+def ask_password(component: str, key_store_pw: Optional[str] = None) -> None:
     global global_password
     if not key_store_pw:
-        key_store_pw = config.get("ca", "password", fallback="default")
+        key_store_pw = config.get(component, "password", fallback="default")
 
     if key_store_pw == "default":
         logger.warning(
@@ -90,7 +90,7 @@ def ask_password(key_store_pw: Optional[str] = None) -> None:
     global_password = key_store_pw
 
 
-def cmd_mkcert(workingdir: str, name: str, password: Optional[str] = None) -> None:
+def cmd_mkcert(component, workingdir: str, name: str, password: Optional[str] = None) -> None:
     cwd = os.getcwd()
     mask = os.umask(0o037)
     try:
@@ -105,7 +105,7 @@ def cmd_mkcert(workingdir: str, name: str, password: Optional[str] = None) -> No
                 f"Private key of type {type(ca_pk).__name__} cannot be used for creating an x509 certificate"
             )
 
-        cert, pk = ca_impl.mk_signed_cert(cacert, ca_pk, name, priv[0]["lastserial"] + 1)
+        cert, pk = ca_impl.mk_signed_cert(component, cacert, ca_pk, name, priv[0]["lastserial"] + 1)
 
         with os.fdopen(os.open(f"{name}-cert.crt", os.O_WRONLY | os.O_CREAT, 0o640), "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
@@ -171,7 +171,7 @@ def cmd_import_priv(workingdir: str, priv_pem_file: str, lastserial: int) -> Non
         os.chdir(cwd)
 
 
-def cmd_init(workingdir: str) -> None:
+def cmd_init(component: str, workingdir: str) -> None:
     cwd = os.getcwd()
     mask = os.umask(0o037)
     try:
@@ -183,7 +183,7 @@ def cmd_init(workingdir: str) -> None:
         rmfiles("*.der")
         rmfiles("private.yml")
 
-        cacert, ca_pk, _ = ca_impl.mk_cacert()  # pylint: disable=W0632
+        cacert, ca_pk, _ = ca_impl.mk_cacert(component)  # pylint: disable=W0632
         priv = read_private(False)
 
         # write out keys
@@ -436,35 +436,36 @@ def main(argv: List[str] = sys.argv) -> None:  # pylint: disable=dangerous-defau
     os.umask(0o077)
 
     if args.command == "init":
-        ask_password(None)
-        cmd_init(workingdir)
+        # ask_password(None)
+        # cmd_init(workingdir)
+        pass
     elif args.command == "create":
         if args.name is None:
             logger.error("you must pass in a name for the certificate using -n (or --name)")
             parser.print_help()
             sys.exit(-1)
-        ask_password(None)
-        cmd_mkcert(workingdir, args.name)
+        # ask_password(None)
+        # cmd_mkcert(workingdir, args.name)
     elif args.command == "pkg":
         if args.name is None:
             logger.error("you must pass in a name for the certificate using -n (or --name)")
             parser.print_help()
             sys.exit(-1)
-        ask_password(None)
+        # ask_password(None)
         cmd_certpkg(workingdir, args.name, args.insecure)
     elif args.command == "revoke":
         if args.name is None:
             logger.error("you must pass in a name for the certificate using -n (or --name)")
             parser.print_help()
             sys.exit(-1)
-        ask_password(None)
+        # ask_password(None)
         cmd_revoke(workingdir, args.name)
     elif args.command == "import-priv":
         if args.serial is None:
             logger.error("you must pass in the last serial number the CA has used using -s (or --serial)")
             parser.print_help()
             sys.exit(-1)
-        ask_password(None)
+        # ask_password(None)
         cmd_import_priv(workingdir, args.file, args.serial)
     else:
         logger.error("Invalid command: %s", args.command)
