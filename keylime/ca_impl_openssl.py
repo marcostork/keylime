@@ -47,7 +47,7 @@ def mk_name(component: str, common_name: str) -> Name:
     )
 
 
-def mk_request(component:str, bits: int, common_name: str) -> Tuple[CertificateBuilder, RSAPrivateKey]:
+def mk_request(component: str, bits: int, common_name: str) -> Tuple[CertificateBuilder, RSAPrivateKey]:
     """
     Create a X509 request with the given number of bits in they key.
     Args:

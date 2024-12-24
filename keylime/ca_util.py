@@ -70,7 +70,7 @@ def read_password(component: str, key_store_pw: Optional[str] = None) -> None:
         key_store_pw = config.get(component, "password", fallback="default")
 
     if key_store_pw == "default":
-        logger.warning(f"Using 'default' password option from {component} configuration file")
+        logger.warning("Using 'default' password option from %s configuration file", component)
     global_password = key_store_pw
 
 
