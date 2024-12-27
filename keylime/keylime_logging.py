@@ -1,11 +1,12 @@
 import contextvars
 import logging
+import os
 import sys
 from configparser import RawConfigParser
 from contextlib import contextmanager
 from logging import Logger
 from logging import config as logging_config
-from typing import TYPE_CHECKING, Any, Callable, Dict
+from typing import TYPE_CHECKING, Any, Callable, Dict, Tuple
 
 from keylime import config
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 DEFAULT_LOGGING_CONFIG = {
     "version": 1,
-    "root": {"level": "NOTSET", "handlers": ["console"]},
+    "root": {"level": "INFO", "handlers": ["console"]},
     "loggers": {
         "keylime": {  # Keylime logger
             "level": "INFO",
@@ -23,7 +24,7 @@ DEFAULT_LOGGING_CONFIG = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "level": "NOTSET",
+            "level": "INFO",
             "formatter": "simple",
             "stream": "ext://sys.stdout",  # Outputs to console
         }
@@ -88,16 +89,13 @@ def annotate_logger(logger: Logger) -> None:
 
 def _configure_logging_from_raw(raw_config: RawConfigParser) -> None:
     """
-    Configures logging programmatically based on the provided RawConfigParser object.
+    Configures logging dynamically based on the provided RawConfigParser object.
 
     Args:
         raw_config (RawConfigParser): The source configuration containing logging sections.
     """
-    # Dictionaries to store formatters and handlers
+    # Step 1: Configure formatters
     formatters = {}
-    handlers = {}
-
-    # Step 1: Process formatters first
     for section in raw_config.sections():
         if section.startswith("formatter_"):
             formatter_name = section.split("_", 1)[1]
@@ -106,7 +104,8 @@ def _configure_logging_from_raw(raw_config: RawConfigParser) -> None:
             datefmt = formatter_options.get("datefmt", None)
             formatters[formatter_name] = logging.Formatter(format_str, datefmt)
 
-    # Step 2: Process handlers after formatters
+    # Step 2: Configure handlers
+    handlers = {}
     for section in raw_config.sections():
         if section.startswith("handler_"):
             handler_name = section.split("_", 1)[1]
@@ -114,13 +113,16 @@ def _configure_logging_from_raw(raw_config: RawConfigParser) -> None:
             handler_class = handler_options.get("class", "logging.StreamHandler")
             level = handler_options.get("level", "NOTSET").upper()
             formatter_name = handler_options.get("formatter", None)
-            args = eval(handler_options.get("args", "()"))  # Handle args safely
+
+            # Parse args safely
+            args = _parse_args(handler_options.get("args", "()"))
 
             try:
                 if "StreamHandler" in handler_class:
                     handler = logging.StreamHandler(stream=sys.stdout if not args else args[0])
                 elif "FileHandler" in handler_class:
-                    handler = logging.FileHandler(filename=args[0])
+                    filename = args[0]
+                    handler = logging.FileHandler(filename=filename)
                 else:
                     raise ValueError(f"Unsupported handler class: {handler_class}")
 
@@ -132,23 +134,74 @@ def _configure_logging_from_raw(raw_config: RawConfigParser) -> None:
             except Exception as e:
                 print(f"Error configuring handler {handler_name}: {e}", file=sys.stderr)
 
-    # Step 3: Process loggers after handlers
+    # Step 3: Configure root logger
+    if "logger_root" in raw_config.sections():
+        root_logger = logging.getLogger()
+        root_options = dict(raw_config.items("logger_root"))
+        level = root_options.get("level", "NOTSET").upper()
+        handler_names = [name.strip() for name in root_options.get("handlers", "").split(",") if name]
+
+        # Set root logger level
+        root_logger.setLevel(getattr(logging, level, logging.NOTSET))
+
+        # Clear existing handlers
+        root_logger.handlers = []
+
+        # Attach new handlers
+        for handler_name in handler_names:
+            if handler_name in handlers:
+                root_logger.addHandler(handlers[handler_name])
+
+    # Step 4: Configure other loggers
     for section in raw_config.sections():
-        if section.startswith("logger_"):
+        if section.startswith("logger_") and section != "logger_root":
             logger_name = section.split("_", 1)[1]
             logger_options = dict(raw_config.items(section))
             level = logger_options.get("level", "NOTSET").upper()
             propagate = logger_options.get("propagate", "1") == "1"
-            handler_names = logger_options.get("handlers", "").split(",")
+            handler_names = [name.strip() for name in logger_options.get("handlers", "").split(",") if name]
 
             logger = logging.getLogger(logger_name)
             logger.setLevel(getattr(logging, level, logging.NOTSET))
             logger.propagate = propagate
 
+            # Attach handlers, merging with existing handlers
+            logger.handlers = []
             for handler_name in handler_names:
-                handler_name = handler_name.strip()
                 if handler_name in handlers:
                     logger.addHandler(handlers[handler_name])
+
+
+def _parse_args(args_str: str) -> Tuple:
+    """
+    Safely parse the `args` string from the configuration.
+
+    Args:
+        args_str (str): The string representation of arguments (e.g., "(sys.stdout,)").
+
+    Returns:
+        tuple: A parsed tuple of arguments.
+    """
+    if args_str == "()":
+        return ()
+    elif args_str == "(sys.stdout,)":
+        return (sys.stdout,)
+    elif args_str.startswith("(") and args_str.endswith(")"):
+        args_list = args_str[1:-1].split(",")  # Remove parentheses and split
+        args_list = [arg.strip() for arg in args_list if arg.strip()]
+        # Handle basic parsing (extend this for your specific cases)
+        parsed_args = []
+        for arg in args_list:
+            if arg == "sys.stdout":
+                parsed_args.append(sys.stdout)
+            elif arg == "sys.stderr":
+                parsed_args.append(sys.stderr)
+            else:
+                # Handle as string or other basic types
+                parsed_args.append(arg)
+        return tuple(parsed_args)
+    else:
+        raise ValueError(f"Invalid args format: {args_str}")
 
 
 @contextmanager
@@ -176,7 +229,7 @@ def safe_logging_configuration():
 
     try:
         yield  # Run the logging configuration
-    except Exception as e:
+    except:
         # Restore potentially affected loggers
         for name, logger in logging.Logger.manager.loggerDict.items():
             if name in existing_loggers and isinstance(logger, logging.Logger):
@@ -208,7 +261,7 @@ def init_logging(loggername: str) -> Logger:
             with safe_logging_configuration():
                 _configure_logging_from_raw(component_config)
         except Exception as e:
-            logger.error("Logging configuration error:", e)
+            logger.error("Logging configuration error: %s", e)
 
     logging.getLogger("requests").setLevel(logging.WARNING)
 

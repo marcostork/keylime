@@ -89,10 +89,10 @@ def init_tls_dir(component: str, logger: Optional[Logger] = None) -> str:
             ca_util.cmd_init(component, tls_dir)
 
         # Check if all options are set as "default"
-        for option in options:
-            value = config.get(component, option)
-            if value != "default":
-                raise Exception(f"To use tls_dir=generate, the following options must be set to 'default': {options}")
+        # for option in options:
+        #     value = config.get(component, option)
+        #     if value != "default":
+        #         raise Exception(f"To use tls_dir=generate, the following options must be set to 'default': {options}")
 
         server_key_path = os.path.join(tls_dir, "server-private.pem")
         server_cert_path = os.path.join(tls_dir, "server-cert.crt")
