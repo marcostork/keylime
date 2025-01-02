@@ -15,22 +15,22 @@ if TYPE_CHECKING:
 
 DEFAULT_LOGGING_CONFIG = {
     "version": 1,
-    "root": {"level": "INFO", "handlers": ["console"]},
+    "root": {"level": "INFO", "handlers": ["consoleHandler"]},
     "loggers": {
         "keylime": {  # Keylime logger
             "level": "INFO",
         },
     },
     "handlers": {
-        "console": {
+        "consoleHandler": {
             "class": "logging.StreamHandler",
             "level": "INFO",
-            "formatter": "simple",
+            "formatter": "formatter_formatter",
             "stream": "ext://sys.stdout",  # Outputs to console
         }
     },
     "formatters": {
-        "simple": {
+        "formatter_formatter": {
             "format": "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
