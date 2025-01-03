@@ -163,52 +163,36 @@ ek_check_script = {{ tenant.ek_check_script }}
 # Path to file containing the measured boot reference state
 mb_refstate = {{ tenant.mb_refstate }}
 
-# Logging Configuration Template
-# This section contains the default logging configuration for the application.
-# You can uncomment and modify sections to customize the logging behavior.
+# Keylime logging configuration
 
-# Key Points:
-# 1. The current settings reflect the default configuration.
-# 2. Uncomment sections to override the defaults.
-# 3. By default, the root logger logs to the console at the INFO level.
-# 4. You can create new handlers and attach them to custom loggers for specific use cases.
+# The configuration file version number
+[logging]
+version = {{ logging.version }}
 
-# Formatters Section
-# Define the format of log messages. Uncomment and modify to customize.
+[loggers]
+keys = {{ loggers.get('keys') }}
 
-#[formatter_formatter]
-#format = {{ formatter_formatter.format }}
-#datefmt = {{ formatter_formatter.datefmt }}
+[handlers]
+keys = {{ handlers.get('keys') }}
 
-# Handlers Section
-# Define where log messages are sent. Uncomment and modify to customize.
+[formatters]
+keys = {{ formatters.get('keys') }}
 
-# Default console handler for the root logger.
-#[handler_consoleHandler]
-#class = {{ handler_consoleHandler.class }}
-#level = {{ handler_consoleHandler.level }}
-#formatter = {{ handler_consoleHandler.formatter }}
-#args = {{ handler_consoleHandler.args }}
+[formatter_formatter]
+format = {{ formatter_formatter.format }}
+datefmt = {{ formatter_formatter.datefmt }}
 
-# Root Logger Section
-# The root logger configuration. Uncomment and modify to customize.
+[logger_root]
+level = {{ logger_root.level }}
+handlers = {{ logger_root.handlers }}
 
-#[logger_root]
-#level = {{ logger_root.level }}
-#handlers = {{ logger_root.handlers }}
+[handler_consoleHandler]
+class = {{ handler_consoleHandler.class }}
+level = {{ handler_consoleHandler.level }}
+formatter = {{ handler_consoleHandler.formatter }}
+args = {{ handler_consoleHandler.args }}
 
-# EXAMPLE Section
-# Define additional loggers for specific components. Uncomment and modify as needed.
-
-# File handler for logging to a file.
-#[handler_file]
-#class = logging.FileHandler
-#level = DEBUG
-#formatter = simple
-#args = ('application.log',)  # Specify the log file path.
-
-# Logger for a custom component.
-#[logger_keylime.tenant]
-#level = DEBUG
-#handlers = file
-#propagate = 1
+[logger_keylime]
+level = {{ logger_keylime.level }}
+qualname = {{ logger_keylime.qualname }}
+handlers = {{ logger_keylime.handlers }}

@@ -28,6 +28,8 @@ def get_tls_dir(component: str) -> str:
             generatedir = "cv_ca"
         elif component == "registrar":
             generatedir = "reg_ca"
+        elif component == "tenant":
+            generatedir = "ten_ca"
         else:
             raise Exception(f"The tls_dir=generate option is not supported for " f"'{component}'")
 
