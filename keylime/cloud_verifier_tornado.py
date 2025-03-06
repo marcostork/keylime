@@ -1410,6 +1410,69 @@ class MbpolicyHandler(BaseHandler):
         raise NotImplementedError()
 
 
+class Quote(BaseHandler):
+    """Handles GET requests to provide attestation details (nonce, PCR mask, and IMA offset)."""
+
+    def head(self) -> None:
+        web_util.echo_json_response(self, 400, "HEAD Not Implemented")
+
+    def get():
+        """Handles GET requests to provide attestation details (nonce, PCR mask, and IMA offset)."""
+        session = get_session()
+
+        # Extract agent ID from request
+        agent_id = self.get_argument("agent_id", None)
+        if not agent_id:
+            web_util.echo_json_response(self, 400, "Missing agent_id")
+            return
+
+        try:
+            agent = session.query(VerfierMain).filter_by(agent_id=agent_id).one_or_none()
+        except SQLAlchemyError as e:
+            logger.error("SQLAlchemy Error for agent ID %s: %s", agent_id, e)
+            web_util.echo_json_response(self, 500, "Database error")
+            return
+
+        if not agent:
+            web_util.echo_json_response(self, 404, "Agent not found")
+            return
+
+        # Check attestation timing
+        min_interval = config.getint(
+            "verifier", "attestation_min_interval", fallback=30
+        )  # TODO: create attestation_min_intervall
+        last_attestation_time = agent.last_successful_attestation
+        current_time = int(time.time())
+
+        if last_attestation_time and (current_time - last_attestation_time < min_interval):
+            retry_after = min_interval - (current_time - last_attestation_time)
+            self.set_status(429)
+            self.set_header("Retry-After", str(retry_after))
+            web_util.echo_json_response(self, 429, "Too many requests. Retry later.")
+            return
+
+        # Check if last attestation failed
+        # TODO: check if configured verification policy for the node has not since changed
+        if agent.operational_state == states.INVALID_QUOTE:
+            web_util.echo_json_response(self, 503, "Last attestation failed. Retry with backoff.")
+            return
+
+        # Generate new nonce and fetch PCR mask, IMA offset
+        response = cloud_verifier_common.prepare_get_quote(agent)
+        agent.nonce = response["nonce"]
+        agent.last_nonce_time = current_time
+        try:
+            # Persist the nonce and the current time
+            session.add(agent)
+            session.commit()
+        except SQLAlchemyError as e:
+            logger.error("SQLAlchemy Error: %s", e)
+            web_util.echo_json_response(self, 500, "Database error")
+            return
+
+        web_util.echo_json_response(self, 200, "Success", response)
+
+
 async def update_agent_api_version(agent: Dict[str, Any], timeout: float = 60.0) -> Union[Dict[str, Any], None]:
     agent_id = agent["agent_id"]
 
