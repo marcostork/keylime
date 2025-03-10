@@ -57,7 +57,6 @@ class VerfierMain(Base):
     current_backoff = Column(Integer)
 
 
-
 class VerifierAllowlist(Base):
     __tablename__ = "allowlists"
     __table_args__ = (schema.UniqueConstraint("name", name="uniq_allowlists0name"),)

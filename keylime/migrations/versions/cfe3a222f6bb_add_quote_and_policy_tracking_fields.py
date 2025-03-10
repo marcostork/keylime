@@ -35,8 +35,8 @@ def upgrade_cloud_verifier():
     """Apply the migration: Add quote and policy tracking fields"""
     # Add nonce, last_attestation_attempt and current_backoff
     op.add_column('verifiermain', sa.Column('nonce', sa.String(length=80)))
-    op.add_column('verifiermain', sa.Column('last_attestation_attempt'), sa.Integer)
-    op.add_column('verifiermain', sa.Column('current_backoff'), sa.Integer)
+    op.add_column('verifiermain', sa.Column('last_attestation_attempt', sa.Integer))
+    op.add_column('verifiermain', sa.Column('current_backoff', sa.Integer))
 
     # Add the last_updated column as nullable first
     op.add_column('allowlists', sa.Column('last_updated', sa.DateTime(), nullable=True))
