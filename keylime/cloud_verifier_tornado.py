@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 import traceback
+import time
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Process
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
@@ -1416,7 +1417,7 @@ class Quote(BaseHandler):
     def head(self) -> None:
         web_util.echo_json_response(self, 400, "HEAD Not Implemented")
 
-    def get():
+    def get(self):
         """Handles GET requests to provide attestation details (nonce, PCR mask, and IMA offset)."""
         session = get_session()
 
@@ -1437,12 +1438,26 @@ class Quote(BaseHandler):
             web_util.echo_json_response(self, 404, "Agent not found")
             return
 
+        # Check if last attestation failed
+        # TODO: check if configured verification policy for the node has not since changed
+        current_time = int(time.time())
+        if agent.operational_state in [states.INVALID_QUOTE, states.FAILED]:
+            policy_change = (
+                agent.ima_policy.last_update > agent.last_attestation_attempt or
+                agent.mb_policy.last_update > agent.last_attestation_attempt
+            )
+            retry_after = (agent.last_attestation_attempt + agent.current_backoff) - current_time
+            if not policy_change and retry_after > 0:
+                self.set_status(503)
+                self.set_header("Retry-After", str(retry_after))
+                web_util.echo_json_response(self, 503, "Last attestation failed. Retry with backoff.")
+                return
+
         # Check attestation timing
         min_interval = config.getint(
             "verifier", "attestation_min_interval", fallback=30
         )  # TODO: create attestation_min_intervall
         last_attestation_time = agent.last_successful_attestation
-        current_time = int(time.time())
 
         if last_attestation_time and (current_time - last_attestation_time < min_interval):
             retry_after = min_interval - (current_time - last_attestation_time)
@@ -1451,16 +1466,10 @@ class Quote(BaseHandler):
             web_util.echo_json_response(self, 429, "Too many requests. Retry later.")
             return
 
-        # Check if last attestation failed
-        # TODO: check if configured verification policy for the node has not since changed
-        if agent.operational_state == states.INVALID_QUOTE:
-            web_util.echo_json_response(self, 503, "Last attestation failed. Retry with backoff.")
-            return
-
         # Generate new nonce and fetch PCR mask, IMA offset
         response = cloud_verifier_common.prepare_get_quote(agent)
         agent.nonce = response["nonce"]
-        agent.last_nonce_time = current_time
+        agent.last_attestation_attempt = current_time
         try:
             # Persist the nonce and the current time
             session.add(agent)

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, ForeignKey, Integer, LargeBinary, PickleType, String, Text, schema
+from sqlalchemy import Column, ForeignKey, Integer, LargeBinary, String, Text, DateTime
+from sqlalchemy import PickleType, schema, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -51,6 +52,10 @@ class VerfierMain(Base):
     last_received_quote = Column(Integer)
     last_successful_attestation = Column(Integer)
     tpm_clockinfo = Column(JSONPickleType(pickler=JSONPickler))
+    nonce = Column(String(80))
+    last_attestation_attempt = Column(Integer)
+    current_backoff = Column(Integer)
+
 
 
 class VerifierAllowlist(Base):
@@ -63,6 +68,7 @@ class VerifierAllowlist(Base):
     generator = Column(Integer)
     tpm_policy = Column(Text())
     ima_policy = Column(Text().with_variant(Text(429400000), "mysql"))
+    last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class VerifierMbpolicy(Base):
@@ -72,3 +78,4 @@ class VerifierMbpolicy(Base):
     agent = relationship("VerfierMain", back_populates="mb_policy")
     name = Column(String(255), nullable=False)
     mb_policy = Column(Text().with_variant(Text(429400000), "mysql"))
+    last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
