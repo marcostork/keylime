@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+
 from sqlalchemy import create_engine
 
 from keylime.db.keylime_db import SessionManager
@@ -53,5 +55,8 @@ class TestQuote(unittest.TestCase):
         self.session.add(VerfierMain(**test_data, ima_policy=allowlist, mb_policy=mbpolicy))
         self.session.commit()
 
-    def test_get(self):
-        pass
+    @patch("keylime.cloud_verifier_tornado.Quote.get_argument")
+    @patch("web_util.echo_json_response")
+    def test_get(self, mock_get_argument):
+        mock_get_argument.return_value = test_data['agent_id']
+        Quote().get()
