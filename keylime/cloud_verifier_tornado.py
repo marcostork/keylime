@@ -678,6 +678,7 @@ class AgentsHandler(BaseHandler):
                         try:
                             if runtime_policy_stored is None:
                                 runtime_policy_stored = VerifierAllowlist(**runtime_policy_db_format)
+                                runtime_policy_stored.last_update = int(time.time())
                                 session.add(runtime_policy_stored)
                                 session.commit()
                         except SQLAlchemyError as e:
@@ -746,6 +747,7 @@ class AgentsHandler(BaseHandler):
                         try:
                             mb_policy_db_format = mba.mb_policy_db_contents(mb_policy_name, mb_policy)
                             mb_policy_stored = VerifierMbpolicy(**mb_policy_db_format)
+                            mb_policy_stored.last_update = int(time.time())
                             session.add(mb_policy_stored)
                             session.commit()
                         except SQLAlchemyError as e:
@@ -1021,6 +1023,8 @@ class AllowlistHandler(BaseHandler):
         if not runtime_policy_db_format:
             return
 
+        runtime_policy_db_format['last_update'] = int(time.time())
+
         session = get_session()
         # don't allow overwritting
         try:
@@ -1058,6 +1062,8 @@ class AllowlistHandler(BaseHandler):
         runtime_policy_db_format = self.__get_runtime_policy_db_format(runtime_policy_name)
         if not runtime_policy_db_format:
             return
+
+        runtime_policy_db_format['last_update'] = int(time.time())
 
         session = get_session()
         # don't allow creating a new policy
@@ -1340,6 +1346,8 @@ class MbpolicyHandler(BaseHandler):
         if not mb_policy_db_format:
             return
 
+        mb_policy_db_format['last_update'] = int(time.time())
+
         session = get_session()
         # don't allow overwritting
         try:
@@ -1379,6 +1387,8 @@ class MbpolicyHandler(BaseHandler):
         mb_policy_db_format = self.__get_mb_policy_db_format(mb_policy_name)
         if not mb_policy_db_format:
             return
+
+        mb_policy_db_format['last_update'] = int(time.time())
 
         session = get_session()
         # don't allow creating a new policy
@@ -1439,7 +1449,6 @@ class Quote(BaseHandler):
             return
 
         # Check if last attestation failed
-        # TODO: check if configured verification policy for the node has not since changed
         current_time = int(time.time())
         if agent.operational_state in [states.INVALID_QUOTE, states.FAILED]:
             policy_change = (

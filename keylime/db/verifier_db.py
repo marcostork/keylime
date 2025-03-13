@@ -67,7 +67,7 @@ class VerifierAllowlist(Base):
     generator = Column(Integer)
     tpm_policy = Column(Text())
     ima_policy = Column(Text().with_variant(Text(429400000), "mysql"))
-    last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_update = Column(DateTime)
 
 
 class VerifierMbpolicy(Base):
@@ -77,4 +77,4 @@ class VerifierMbpolicy(Base):
     agent = relationship("VerfierMain", back_populates="mb_policy")
     name = Column(String(255), nullable=False)
     mb_policy = Column(Text().with_variant(Text(429400000), "mysql"))
-    last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_update = Column(DateTime)
