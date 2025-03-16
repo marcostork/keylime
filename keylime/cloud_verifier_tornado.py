@@ -4,8 +4,8 @@ import functools
 import os
 import signal
 import sys
-import traceback
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Process
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
@@ -1023,7 +1023,7 @@ class AllowlistHandler(BaseHandler):
         if not runtime_policy_db_format:
             return
 
-        runtime_policy_db_format['last_update'] = int(time.time())
+        runtime_policy_db_format["last_update"] = int(time.time())
 
         session = get_session()
         # don't allow overwritting
@@ -1063,7 +1063,7 @@ class AllowlistHandler(BaseHandler):
         if not runtime_policy_db_format:
             return
 
-        runtime_policy_db_format['last_update'] = int(time.time())
+        runtime_policy_db_format["last_update"] = int(time.time())
 
         session = get_session()
         # don't allow creating a new policy
@@ -1346,7 +1346,7 @@ class MbpolicyHandler(BaseHandler):
         if not mb_policy_db_format:
             return
 
-        mb_policy_db_format['last_update'] = int(time.time())
+        mb_policy_db_format["last_update"] = int(time.time())
 
         session = get_session()
         # don't allow overwritting
@@ -1388,7 +1388,7 @@ class MbpolicyHandler(BaseHandler):
         if not mb_policy_db_format:
             return
 
-        mb_policy_db_format['last_update'] = int(time.time())
+        mb_policy_db_format["last_update"] = int(time.time())
 
         session = get_session()
         # don't allow creating a new policy
@@ -1450,13 +1450,13 @@ class Quote(BaseHandler):
 
         # Check if last attestation failed
         current_time = int(time.time())
-        if agent.operational_state in [states.INVALID_QUOTE, states.FAILED]:
-            policy_change = (
-                agent.ima_policy.last_update > agent.last_attestation_attempt or
-                agent.mb_policy.last_update > agent.last_attestation_attempt
-            )
+        policy_change = (
+            agent.ima_policy.last_update > agent.last_attestation_attempt
+            or agent.mb_policy.last_update > agent.last_attestation_attempt
+        )
+        if agent.operational_state in [states.INVALID_QUOTE, states.FAILED] and not policy_change:
             retry_after = (agent.last_attestation_attempt + agent.current_backoff) - current_time
-            if not policy_change and retry_after > 0:
+            if retry_after > 0:
                 self.set_status(503)
                 self.set_header("Retry-After", str(retry_after))
                 web_util.echo_json_response(self, 503, "Last attestation failed. Retry with backoff.")
@@ -1489,6 +1489,83 @@ class Quote(BaseHandler):
             return
 
         web_util.echo_json_response(self, 200, "Success", response)
+        return
+
+    def post(self):
+        """Handles POST requests to receive and check if quote is well formed."""
+        session = get_session()
+
+        # Extract agent ID from request
+        agent_id = self.get_argument("agent_id", None)
+        if not agent_id:
+            web_util.echo_json_response(self, 400, "Missing agent_id")
+            return
+
+        try:
+            agent = session.query(VerfierMain).filter_by(agent_id=agent_id).one_or_none()
+        except SQLAlchemyError as e:
+            logger.error("SQLAlchemy Error for agent ID %s: %s", agent_id, e)
+            web_util.echo_json_response(self, 500, "Database error")
+            return
+
+        if not agent:
+            web_util.echo_json_response(self, 404, "Agent not found")
+            return
+
+        # Check if a nonce was generated
+        if not agent.nonce:
+            web_util.echo_json_response(self, 400, "A nonce must be created.")
+            return
+
+        # Extract nonce from request
+        client_nonce = self.get_argument("nonce", None)
+        if not nonce:
+            web_util.echo_json_response(self, 400, "Missing nonce")
+            return
+
+        # Check if the nonce is expired
+        nonce_ttl = config.getint("verifier", "nonce_ttl", fallback=30)  # TODO: create nonce_ttl
+        current_time = int(time.time())
+        if current_time > agent.last_attestation_attempt + nonce_ttl:
+            web_util.echo_json_response(self, 400, "Expired nonce.")
+            self._set_backoff(agent)
+            return
+
+        if client_nonce != agent.nonce:
+            web_util.echo_json_response(self, 400, "Invalid nonce")
+            self._set_backoff(agent)
+            return
+
+        agent.last_successful_attestation = current_time
+        min_interval = config.getint(
+            "verifier", "attestation_min_interval", fallback=30
+        )  # TODO: create attestation_min_intervall
+
+        self.set_status(200)
+        self.set_header("Next-Attestation", str(min_interval))
+        web_util.echo_json_response(self, 200, "Success", response)
+
+        failure = await process_quote(quote)
+
+        if failure:
+            self._set_backoff(agent)
+
+    def _set_backoff(agent: VerfierMain) -> None:
+        base_delay = 2
+        if agent.current_backoff:
+            agent.current_backoff = base_delay * agent.current_backoff
+        else:
+            agent.current_backoff = 2
+
+        try:
+            session = get_session()
+            # Persist the nonce and the current time
+            session.add(agent)
+            session.commit()
+        except SQLAlchemyError as e:
+            logger.error("SQLAlchemy Error: %s", e)
+            web_util.echo_json_response(self, 500, "Database error")
+            return
 
 
 async def update_agent_api_version(agent: Dict[str, Any], timeout: float = 60.0) -> Union[Dict[str, Any], None]:
